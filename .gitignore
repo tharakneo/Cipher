@@ -1,0 +1,24 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.Python
+
+# Environment — never commit secrets
+.env
+
+# Data — SRTs and chunks are large, generate locally
+scripts/data/*.srt
+scripts/data/chunks.json
+scripts/data/test_audio/
+
+# macOS
+.DS_Store
+
+# Expo
+expo/node_modules/
+expo/.expo/
+
+# Qdrant
+qdrant_storage/

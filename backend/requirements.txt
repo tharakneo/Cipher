@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+openai-whisper
+qdrant-client
+sentence-transformers
+httpx
