@@ -9,11 +9,14 @@ from fastapi.responses import JSONResponse
 from .transcribe import transcribe
 from .search import search
 from .justwatch import get_streaming
+from .tmdb import get_movie_details
 
 app = FastAPI()
 
 
-TEST_QUERY = "You either die a hero or live long enough to see yourself become the villain"
+TEST_QUERY = (
+    "You either die a hero or live long enough to see yourself become the villain"
+)
 
 
 @app.get("/test")
@@ -21,11 +24,13 @@ async def test():
     result = search(TEST_QUERY)
     if result is None:
         return JSONResponse({"match": False})
-    return JSONResponse({
-        "movie": result["movie"],
-        "year": result["year"],
-        "confidence": result["confidence"],
-    })
+    return JSONResponse(
+        {
+            "movie": result["movie"],
+            "year": result["year"],
+            "confidence": result["confidence"],
+        }
+    )
 
 
 @app.post("/identify")
@@ -41,6 +46,9 @@ async def identify(audio: UploadFile = File(...)):
                 raise HTTPException(status_code=400, detail="Audio file is empty")
             tmp.write(content)
 
+        print(
+            f"Received file: {audio.filename}, size: {len(content)} bytes, suffix: {suffix}"
+        )
         transcript = transcribe(tmp_path)
         print(f"Transcript: {transcript!r}")
 
@@ -57,13 +65,22 @@ async def identify(audio: UploadFile = File(...)):
             return JSONResponse({"match": False})
 
         streaming = get_streaming(result["movie"], result["year"])
+        tmdb = get_movie_details(result["movie"], result["year"])
 
-        return JSONResponse({
-            "movie": result["movie"],
-            "year": result["year"],
-            "confidence": result["confidence"],
-            "streaming": streaming,
-        })
+        return JSONResponse(
+            {
+                "movie": result["movie"],
+                "year": result["year"],
+                "confidence": result["confidence"],
+                "poster_url": tmdb.get("poster_url"),
+                "backdrop_url": tmdb.get("backdrop_url"),
+                "logo_url": tmdb.get("logo_url"),
+                "synopsis": tmdb.get("synopsis"),
+                "rating": tmdb.get("rating"),
+                "genres": tmdb.get("genres", []),
+                "streaming": streaming,
+            }
+        )
 
     except HTTPException:
         raise

@@ -38,6 +38,7 @@ _QUERY = """
 
 # ── deep link builders ────────────────────────────────────────────────────────
 
+
 def _build_netflix(url: str) -> str:
     m = re.search(r"netflix\.com/title/(\d+)", url)
     return f"nflx://www.netflix.com/title/{m.group(1)}" if m else url
@@ -70,17 +71,18 @@ def _build_appletv(url: str) -> str:
 
 # technicalName → (display name, deep link builder)
 _PROVIDERS = {
-    "netflix":            ("Netflix",     _build_netflix),
+    "netflix": ("Netflix", _build_netflix),
     "amazon_prime_video": ("Prime Video", _build_prime),
-    "hbo_max":            ("Max",         _build_max),
-    "max":                ("Max",         _build_max),
-    "hulu":               ("Hulu",        _build_hulu),
-    "apple_tv_plus":      ("Apple TV+",   _build_appletv),
-    "itunes":             ("Apple TV+",   _build_appletv),
+    "hbo_max": ("Max", _build_max),
+    "max": ("Max", _build_max),
+    "hulu": ("Hulu", _build_hulu),
+    "apple_tv_plus": ("Apple TV+", _build_appletv),
+    "itunes": ("Apple TV+", _build_appletv),
 }
 
 
 # ── public API ────────────────────────────────────────────────────────────────
+
 
 def get_streaming(movie: str, year: int) -> list[dict]:
     try:

@@ -43,7 +43,8 @@ def start_qdrant() -> None:
     print("\n▶ Starting Qdrant...")
     running = subprocess.run(
         ["docker", "ps", "--format", "{{.Names}}"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     ).stdout
     if "qdrant" in running.splitlines():
         print("  ✅ Qdrant already running")
@@ -53,12 +54,19 @@ def start_qdrant() -> None:
     start = subprocess.run(["docker", "start", "qdrant"], capture_output=True)
     if start.returncode != 0:
         # Container doesn't exist — create it
-        subprocess.run([
-            "docker", "run", "-d",
-            "-p", "6333:6333",
-            "--name", "qdrant",
-            "qdrant/qdrant",
-        ], check=True)
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "-d",
+                "-p",
+                "6333:6333",
+                "--name",
+                "qdrant",
+                "qdrant/qdrant",
+            ],
+            check=True,
+        )
 
     print("  ⏳ Waiting for Qdrant to be ready...")
     time.sleep(3)
@@ -74,8 +82,8 @@ def main() -> None:
     start_docker()
     start_qdrant()
 
-    run("Chunking SRTs → chunks.json",       [sys.executable, "scripts/chunk_srt.py"])
-    run("Embedding into Qdrant",             [sys.executable, "scripts/embed.py"])
+    run("Chunking SRTs → chunks.json", [sys.executable, "scripts/chunk_srt.py"])
+    run("Embedding into Qdrant", [sys.executable, "scripts/embed.py"])
 
     print()
     print("━" * 42)
@@ -84,13 +92,20 @@ def main() -> None:
     print("  API → http://0.0.0.0:8000")
     print("  Press Ctrl+C to stop\n")
 
-    subprocess.run([
-        sys.executable, "-m", "uvicorn",
-        "backend.main:app",
-        "--host", "0.0.0.0",
-        "--port", "8000",
-        "--reload",
-    ], cwd=ROOT)
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "backend.main:app",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "8000",
+            "--reload",
+        ],
+        cwd=ROOT,
+    )
 
 
 if __name__ == "__main__":

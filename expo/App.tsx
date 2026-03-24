@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
@@ -6,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
+  Image,
   Linking,
   Modal,
   PanResponder,
@@ -17,13 +19,14 @@ import {
   View,
 } from 'react-native';
 
-const { width: W, height: H } = Dimensions.get('window');
+const { width: SCREEN_W } = Dimensions.get('window');
 
-const API_URL = 'http://192.168.0.142:8000/identify';
+const API_URL = 'http://192.168.0.98:8000/identify';
 
 // ── Types ────────────────────────────────────────────────────
 
 type AppState = 'idle' | 'listening' | 'processing' | 'result' | 'nomatch' | 'error';
+type Tab = 'home' | 'library' | 'watchlist';
 
 interface StreamingPlatform {
   platform: string;
@@ -34,7 +37,44 @@ interface MatchResult {
   movie: string;
   year: number;
   confidence: number;
+  poster_url?: string;
+  backdrop_url?: string;
+  logo_url?: string;
+  synopsis?: string;
+  rating?: number;
+  genres?: string[];
   streaming: StreamingPlatform[];
+}
+
+interface HistoryItem extends MatchResult {
+  foundAt: number; // Date.now() timestamp
+}
+
+// ── Date grouping ────────────────────────────────────────────
+
+function groupByDate(items: HistoryItem[]): { label: string; items: HistoryItem[] }[] {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterday = today - 86_400_000;
+  const weekAgo = today - 6 * 86_400_000;
+
+  const groups = new Map<string, HistoryItem[]>();
+
+  for (const item of items) {
+    const d = new Date(item.foundAt);
+    const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+    let label: string;
+    if (dayStart === today) label = 'Today';
+    else if (dayStart === yesterday) label = 'Yesterday';
+    else if (dayStart >= weekAgo) label = d.toLocaleDateString('en-US', { weekday: 'long' });
+    else label = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label)!.push(item);
+  }
+
+  return Array.from(groups.entries()).map(([label, data]) => ({ label, items: data }));
 }
 
 // ── App ──────────────────────────────────────────────────────
@@ -43,6 +83,9 @@ export default function App() {
   const [appState, setAppState]     = useState<AppState>('idle');
   const [result, setResult]         = useState<MatchResult | null>(null);
   const [modalVisible, setModal]    = useState(false);
+  const [history, setHistory]       = useState<HistoryItem[]>([]);
+  const [watchlist, setWatchlist]   = useState<MatchResult[]>([]);
+  const [activeTab, setActiveTab]   = useState<Tab>('home');
   const recordingRef                = useRef<Audio.Recording | null>(null);
   const autoStopRef                 = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -54,6 +97,20 @@ export default function App() {
     nomatch:    'No movie found',
     error:      'Something went wrong',
   }[appState];
+
+  // ── Watchlist helpers ───────────────────────────────────
+
+  function isInWatchlist(movie: string) {
+    return watchlist.some(w => w.movie === movie);
+  }
+
+  function toggleWatchlist(item: MatchResult) {
+    setWatchlist(prev =>
+      prev.some(w => w.movie === item.movie)
+        ? prev.filter(w => w.movie !== item.movie)
+        : [...prev, item],
+    );
+  }
 
   // ── Permission ───────────────────────────────────────────
 
@@ -79,6 +136,10 @@ export default function App() {
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        interruptionModeIOS: 0,
+        shouldDuckAndroid: false,
+        interruptionModeAndroid: 1,
       });
 
       const { recording } = await Audio.Recording.createAsync(
@@ -148,7 +209,12 @@ export default function App() {
         return;
       }
 
-      setResult(data as MatchResult);
+      const matched = data as MatchResult;
+      setResult(matched);
+      setHistory(prev => {
+        const filtered = prev.filter(h => h.movie !== matched.movie);
+        return [{ ...matched, foundAt: Date.now() }, ...filtered].slice(0, 50);
+      });
       setAppState('result');
       setModal(true);
 
@@ -167,13 +233,17 @@ export default function App() {
     } else if (appState === 'listening') {
       stopRecording();
     }
-    // ignore taps during processing
   }
 
   function closeModal() {
     setModal(false);
     setAppState('idle');
     setResult(null);
+  }
+
+  function openDetail(item: MatchResult) {
+    setResult(item);
+    setModal(true);
   }
 
   // ── Swipe-down pan responder for modal ───────────────────
@@ -190,60 +260,188 @@ export default function App() {
     <View style={s.root}>
       <StatusBar style="light" />
 
-      {/* Gear */}
-      <TouchableOpacity style={s.gear}>
-        <Text style={s.gearTxt}>⚙</Text>
+      {/* Settings */}
+      <TouchableOpacity style={s.settingsBtn}>
+        <Ionicons name="ellipsis-horizontal" size={22} color="rgba(255,255,255,0.7)" />
       </TouchableOpacity>
 
-      {/* Center block */}
-      <View style={s.centerBlock}>
-        <Text style={s.tapLabel}>{topLabel}</Text>
+      {/* ── HOME TAB ─────────────────────────────────────── */}
+      {activeTab === 'home' && (
+        <>
+          {/* Center block */}
+          <View style={s.centerBlock}>
+            <Text style={s.tapLabel}>{topLabel}</Text>
 
-        <TouchableOpacity onPress={handleTap} activeOpacity={0.85}>
-          <LinearGradient
-            colors={appState === 'listening' ? ['#FF2D2D', '#8B0000'] : ['#E50914', '#8B0000']}
-            start={{ x: 0.3, y: 0.3 }}
-            end={{ x: 1.0, y: 1.0 }}
-            style={[s.circle, appState === 'listening' && s.circleListening]}
-          />
-        </TouchableOpacity>
+            <TouchableOpacity onPress={handleTap} activeOpacity={0.85}>
+              <LinearGradient
+                colors={appState === 'listening' ? ['#FF2D2D', '#8B0000'] : ['#E50914', '#8B0000']}
+                start={{ x: 0.3, y: 0.3 }}
+                end={{ x: 1.0, y: 1.0 }}
+                style={[s.circle, appState === 'listening' && s.circleListening]}
+              />
+            </TouchableOpacity>
 
-        {/* "Tap to stop" hint */}
-        {appState === 'listening' && (
-          <Text style={s.stopHint}>Tap to stop</Text>
-        )}
+            {appState === 'listening' && (
+              <Text style={s.stopHint}>Tap to stop</Text>
+            )}
 
-        {/* Spinner while processing */}
-        {appState === 'processing' && (
-          <ActivityIndicator color="rgba(255,255,255,0.7)" size="small" style={s.spinner} />
-        )}
-      </View>
+            {appState === 'processing' && (
+              <ActivityIndicator color="rgba(255,255,255,0.7)" size="small" style={s.spinner} />
+            )}
+          </View>
 
-      {/* Recently Found */}
-      <View style={s.recentWrap}>
-        <Text style={s.recentLabel}>Recently Found</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.cardRow}>
-          <PlaceholderCard />
-          <PlaceholderCard />
-          <PlaceholderCard />
+          {/* Recently Found */}
+          <View style={s.recentWrap}>
+            <Text style={s.recentLabel}>Recently Found</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.cardRow}>
+              {history.length === 0 ? (
+                <>
+                  <PlaceholderCard />
+                  <PlaceholderCard />
+                  <PlaceholderCard />
+                </>
+              ) : (
+                history.slice(0, 10).map((item, i) => (
+                  <TouchableOpacity key={`${item.movie}-${i}`} onPress={() => openDetail(item)} activeOpacity={0.8}>
+                    <View style={s.posterCard}>
+                      {item.poster_url ? (
+                        <Image source={{ uri: item.poster_url }} style={s.posterCardImg} />
+                      ) : (
+                        <View style={[s.posterCardImg, s.posterCardPlaceholder]}>
+                          <Text style={s.posterCardInitial}>{item.movie[0]}</Text>
+                        </View>
+                      )}
+                      <Text style={s.posterCardTitle} numberOfLines={2}>{item.movie}</Text>
+                      <Text style={s.posterCardYear}>{item.year}</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))
+              )}
+            </ScrollView>
+          </View>
+        </>
+      )}
+
+      {/* ── LIBRARY TAB ──────────────────────────────────── */}
+      {activeTab === 'library' && (
+        <ScrollView style={s.listScreen} contentContainerStyle={s.listContent}>
+          <Text style={s.screenTitle}>Library</Text>
+
+          {history.length === 0 ? (
+            <View style={s.emptyState}>
+              <Ionicons name="musical-notes-outline" size={48} color="rgba(255,255,255,0.15)" />
+              <Text style={s.emptyText}>No movies identified yet</Text>
+              <Text style={s.emptySubtext}>Tap Cipher to get started</Text>
+            </View>
+          ) : (
+            groupByDate(history).map(group => (
+              <View key={group.label} style={s.dateGroup}>
+                <Text style={s.dateLabel}>{group.label}</Text>
+                {group.items.map((item, i) => (
+                  <TouchableOpacity
+                    key={`${item.movie}-${i}`}
+                    style={s.listRow}
+                    onPress={() => openDetail(item)}
+                    activeOpacity={0.7}
+                  >
+                    {item.poster_url ? (
+                      <Image source={{ uri: item.poster_url }} style={s.listThumb} />
+                    ) : (
+                      <View style={[s.listThumb, s.listThumbPlaceholder]}>
+                        <Text style={s.listThumbLetter}>{item.movie[0]}</Text>
+                      </View>
+                    )}
+                    <View style={s.listInfo}>
+                      <Text style={s.listMovie} numberOfLines={1}>{item.movie}</Text>
+                      <Text style={s.listMeta}>
+                        {item.year} · {item.confidence.toFixed(0)}% match
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={() => toggleWatchlist(item)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                      <Ionicons
+                        name={isInWatchlist(item.movie) ? 'bookmark' : 'bookmark-outline'}
+                        size={20}
+                        color={isInWatchlist(item.movie) ? '#E50914' : 'rgba(255,255,255,0.3)'}
+                      />
+                    </TouchableOpacity>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ))
+          )}
         </ScrollView>
-      </View>
+      )}
 
-      {/* Tab bar */}
-      <View style={s.tabBar}>
-        <View style={s.pill}>
-          <TouchableOpacity style={[s.tabItem, s.tabItemActive]}>
-            <Text style={s.tabIconActive}>⌂</Text>
-            <Text style={[s.tabLabel, s.tabLabelActive]}>Home</Text>
+      {/* ── WATCHLIST TAB ────────────────────────────────── */}
+      {activeTab === 'watchlist' && (
+        <ScrollView style={s.listScreen} contentContainerStyle={s.listContent}>
+          <Text style={s.screenTitle}>Watchlist</Text>
+
+          {watchlist.length === 0 ? (
+            <View style={s.emptyState}>
+              <Ionicons name="bookmark-outline" size={48} color="rgba(255,255,255,0.15)" />
+              <Text style={s.emptyText}>Your watchlist is empty</Text>
+              <Text style={s.emptySubtext}>Save movies to watch later</Text>
+            </View>
+          ) : (
+            watchlist.map((item, i) => (
+              <TouchableOpacity
+                key={`${item.movie}-${i}`}
+                style={s.listRow}
+                onPress={() => openDetail(item)}
+                activeOpacity={0.7}
+              >
+                {item.poster_url ? (
+                  <Image source={{ uri: item.poster_url }} style={s.listThumb} />
+                ) : (
+                  <View style={[s.listThumb, s.listThumbPlaceholder]}>
+                    <Text style={s.listThumbLetter}>{item.movie[0]}</Text>
+                  </View>
+                )}
+                <View style={s.listInfo}>
+                  <Text style={s.listMovie} numberOfLines={1}>{item.movie}</Text>
+                  <Text style={s.listMeta}>
+                    {item.year}{item.genres && item.genres.length > 0 ? ` · ${item.genres[0]}` : ''}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => toggleWatchlist(item)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <Ionicons name="bookmark" size={20} color="#E50914" />
+                </TouchableOpacity>
+              </TouchableOpacity>
+            ))
+          )}
+        </ScrollView>
+      )}
+
+      {/* ── Tab bar (frosted glass) ──────────────────────── */}
+      <View style={s.tabBarWrap}>
+        <View style={s.tabBar}>
+          <TouchableOpacity style={s.tabItem} onPress={() => setActiveTab('home')}>
+            <LinearGradient
+              colors={activeTab === 'home' ? ['#E50914', '#8B0000'] : ['#333', '#333']}
+              style={s.tabDot}
+            />
+            <Text style={[s.tabLabel, activeTab === 'home' ? s.tabLabelActive : s.tabLabelInactive]}>Home</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={s.tabItem}>
-            <Text style={s.tabIconInactive}>▤</Text>
-            <Text style={[s.tabLabel, s.tabLabelInactive]}>Library</Text>
+
+          <TouchableOpacity style={s.tabItem} onPress={() => setActiveTab('library')}>
+            <Ionicons
+              name={activeTab === 'library' ? 'albums' : 'albums-outline'}
+              size={22}
+              color={activeTab === 'library' ? '#fff' : 'rgba(255,255,255,0.4)'}
+            />
+            <Text style={[s.tabLabel, activeTab === 'library' ? s.tabLabelActive : s.tabLabelInactive]}>Library</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={s.tabItem} onPress={() => setActiveTab('watchlist')}>
+            <Ionicons
+              name={activeTab === 'watchlist' ? 'bookmark' : 'bookmark-outline'}
+              size={20}
+              color={activeTab === 'watchlist' ? '#fff' : 'rgba(255,255,255,0.4)'}
+            />
+            <Text style={[s.tabLabel, activeTab === 'watchlist' ? s.tabLabelActive : s.tabLabelInactive]}>Watchlist</Text>
           </TouchableOpacity>
         </View>
-        <TouchableOpacity style={s.searchCircle}>
-          <Text style={s.searchIcon}>⌕</Text>
-        </TouchableOpacity>
       </View>
 
       {/* ── Result Modal ──────────────────────────────────── */}
@@ -257,33 +455,93 @@ export default function App() {
           <View style={s.modalOverlay}>
             <TouchableWithoutFeedback>
               <View style={s.modalSheet} {...panResponder.panHandlers}>
-                {/* Drag handle */}
                 <View style={s.dragHandle} />
 
-                <Text style={s.modalMovie}>{result?.movie}</Text>
-                <Text style={s.modalYear}>{result?.year}</Text>
-                <Text style={s.modalConfidence}>
-                  {result?.confidence.toFixed(0)}% match
-                </Text>
-
-                {result && result.streaming.length > 0 ? (
-                  <View style={s.streamingWrap}>
-                    <Text style={s.streamingTitle}>Watch on</Text>
-                    <View style={s.streamingRow}>
-                      {result.streaming.map((s) => (
-                        <TouchableOpacity
-                          key={s.platform}
-                          style={st.platformBtn}
-                          onPress={() => Linking.openURL(s.deep_link)}
-                        >
-                          <Text style={st.platformTxt}>{s.platform}</Text>
-                        </TouchableOpacity>
-                      ))}
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={s.modalScroll}
+                  bounces={false}
+                >
+                  {/* Hero: backdrop image + gradient blend + logo */}
+                  <View style={s.heroWrap}>
+                    {(result?.backdrop_url || result?.poster_url) ? (
+                      <Image
+                        source={{ uri: result.backdrop_url ?? result.poster_url }}
+                        style={s.heroPoster}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={[s.heroPoster, { backgroundColor: '#2E2E2E' }]} />
+                    )}
+                    {/* Strong gradient — blends poster into dark sheet */}
+                    <LinearGradient
+                      colors={['transparent', 'rgba(22,22,22,0.5)', '#161616']}
+                      locations={[0.3, 0.7, 1]}
+                      style={s.heroGradient}
+                    />
+                    {/* Logo / title sitting on gradient */}
+                    <View style={s.heroTitleWrap}>
+                      {result?.logo_url ? (
+                        <Image
+                          source={{ uri: result.logo_url }}
+                          style={s.movieLogo}
+                          resizeMode="contain"
+                        />
+                      ) : (
+                        <Text style={s.modalMovie}>{result?.movie}</Text>
+                      )}
                     </View>
                   </View>
-                ) : (
-                  <Text style={s.noStreaming}>Not streaming in your region</Text>
-                )}
+
+                  {/* Meta line: Year · Confidence */}
+                  <Text style={s.metaLine}>
+                    {result?.year}{`  ·  ${result?.confidence.toFixed(0)}% match`}
+                  </Text>
+
+                  {/* Genre line (inline, Apple TV style) */}
+                  {result?.genres && result.genres.length > 0 && (
+                    <Text style={s.genreLine}>
+                      {result.genres.join(' · ')}
+                    </Text>
+                  )}
+
+                  {/* Action row: streaming buttons + save */}
+                  <View style={s.actionRow}>
+                    {result && result.streaming.length > 0 ? (
+                      result.streaming.map((sv) => (
+                        <TouchableOpacity
+                          key={sv.platform}
+                          style={s.actionBtn}
+                          onPress={() => Linking.openURL(sv.deep_link)}
+                        >
+                          <Text style={s.actionBtnTxt}>{sv.platform}</Text>
+                        </TouchableOpacity>
+                      ))
+                    ) : (
+                      <View style={s.actionBtnMuted}>
+                        <Text style={s.actionBtnMutedTxt}>Not streaming</Text>
+                      </View>
+                    )}
+
+                    {result && (
+                      <TouchableOpacity
+                        style={s.saveCircle}
+                        onPress={() => toggleWatchlist(result)}
+                      >
+                        <Ionicons
+                          name={isInWatchlist(result.movie) ? 'bookmark' : 'bookmark-outline'}
+                          size={20}
+                          color={isInWatchlist(result.movie) ? '#E50914' : '#fff'}
+                        />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Synopsis */}
+                  {result?.synopsis && (
+                    <Text style={s.synopsis}>{result.synopsis}</Text>
+                  )}
+                </ScrollView>
               </View>
             </TouchableWithoutFeedback>
           </View>
@@ -297,32 +555,33 @@ export default function App() {
 
 function PlaceholderCard() {
   return (
-    <View style={s.card}>
-      <View style={s.cardThumb} />
-      <View style={s.cardText}>
-        <View style={s.cardLineLong} />
-        <View style={s.cardLineShort} />
-      </View>
+    <View style={s.posterCard}>
+      <View style={[s.posterCardImg, s.posterCardPlaceholder]} />
+      <View style={{ height: 10, borderRadius: 5, backgroundColor: '#2E2E2E', width: 80, marginTop: 8 }} />
+      <View style={{ height: 8, borderRadius: 4, backgroundColor: '#2E2E2E', width: 50, marginTop: 5 }} />
     </View>
   );
 }
 
 // ── Styles ───────────────────────────────────────────────────
 
-const PILL_H   = 58;
+const TAB_H    = 64;
 const BTN_SIZE = 180;
+const CARD_W   = 110;
+const CARD_H   = 165;
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
 
-  gear: { position: 'absolute', top: 56, right: 20, zIndex: 10, padding: 4 },
-  gearTxt: { fontSize: 22, color: '#fff' },
+  settingsBtn: { position: 'absolute', top: 56, right: 20, zIndex: 10, padding: 6 },
 
+  // ── Home ──
   centerBlock: {
     position: 'absolute',
     top: 0, bottom: 0, left: 0, right: 0,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingBottom: 220,
     gap: 28,
   },
   tapLabel: { fontSize: 22, fontWeight: '700', color: '#fff', textAlign: 'center' },
@@ -337,66 +596,123 @@ const s = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.6)',
   },
 
-  stopHint: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.55)',
-    marginTop: -14,
-  },
+  stopHint: { fontSize: 13, color: 'rgba(255,255,255,0.55)', marginTop: -14 },
   spinner: { marginTop: -14 },
 
-  recentWrap: { position: 'absolute', bottom: 36 + PILL_H + 20, left: 0, right: 0 },
+  recentWrap: { position: 'absolute', bottom: 30 + TAB_H + 16, left: 0, right: 0 },
   recentLabel: { fontSize: 15, fontWeight: '600', color: '#fff', marginLeft: 20, marginBottom: 12 },
-  cardRow: { paddingLeft: 20, paddingRight: 8 },
-  card: {
+  cardRow: { paddingLeft: 20, paddingRight: 8, gap: 12 },
+
+  posterCard: { width: CARD_W, alignItems: 'center' },
+  posterCardImg: { width: CARD_W, height: CARD_H, borderRadius: 10 },
+  posterCardPlaceholder: { backgroundColor: '#2E2E2E', alignItems: 'center', justifyContent: 'center' },
+  posterCardInitial: { fontSize: 32, color: 'rgba(255,255,255,0.3)', fontWeight: '700' },
+  posterCardTitle: { fontSize: 11, color: '#fff', fontWeight: '600', textAlign: 'center', marginTop: 7, width: CARD_W },
+  posterCardYear: { fontSize: 10, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
+
+  // ── Library / Watchlist list screens ──
+  listScreen: { flex: 1, paddingTop: 50 },
+  listContent: { paddingTop: 20, paddingHorizontal: 20, paddingBottom: TAB_H + 50 },
+  screenTitle: { fontSize: 32, fontWeight: '800', color: '#fff', marginBottom: 24 },
+
+  emptyState: { alignItems: 'center', marginTop: 80, gap: 10 },
+  emptyText: { fontSize: 17, color: 'rgba(255,255,255,0.5)', fontWeight: '600' },
+  emptySubtext: { fontSize: 13, color: 'rgba(255,255,255,0.25)' },
+
+  dateGroup: { marginBottom: 24 },
+  dateLabel: { fontSize: 13, fontWeight: '700', color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 12 },
+
+  listRow: {
     flexDirection: 'row', alignItems: 'center',
-    width: W - 60, backgroundColor: '#1A1A1A',
-    borderRadius: 12, padding: 12, marginRight: 10,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 14, padding: 10, marginBottom: 8,
   },
-  cardThumb: { width: 52, height: 52, borderRadius: 8, backgroundColor: '#2E2E2E', marginRight: 12, flexShrink: 0 },
-  cardText: { flex: 1, gap: 8 },
-  cardLineLong: { height: 12, borderRadius: 6, backgroundColor: '#2E2E2E', width: '80%' },
-  cardLineShort: { height: 10, borderRadius: 5, backgroundColor: '#2E2E2E', width: '55%' },
+  listThumb: { width: 50, height: 72, borderRadius: 8 },
+  listThumbPlaceholder: { backgroundColor: '#2E2E2E', alignItems: 'center', justifyContent: 'center' },
+  listThumbLetter: { fontSize: 20, color: 'rgba(255,255,255,0.25)', fontWeight: '700' },
+  listInfo: { flex: 1, marginLeft: 12, gap: 3 },
+  listMovie: { fontSize: 15, fontWeight: '600', color: '#fff' },
+  listMeta: { fontSize: 12, color: 'rgba(255,255,255,0.4)' },
 
-  tabBar: { position: 'absolute', bottom: 36, left: 20, right: 20, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  pill: { flex: 1, flexDirection: 'row', height: PILL_H, borderRadius: PILL_H / 2, backgroundColor: 'rgba(255,255,255,0.10)', overflow: 'hidden' },
-  tabItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3 },
-  tabItemActive: { backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: PILL_H / 2 },
-  tabIconActive:    { fontSize: 18, color: '#fff' },
-  tabIconInactive:  { fontSize: 18, color: 'rgba(255,255,255,0.45)' },
-  tabLabel:         { fontSize: 10, fontWeight: '500' },
-  tabLabelActive:   { color: '#fff' },
-  tabLabelInactive: { color: 'rgba(255,255,255,0.45)' },
-  searchCircle: { width: PILL_H, height: PILL_H, borderRadius: PILL_H / 2, backgroundColor: 'rgba(255,255,255,0.10)', alignItems: 'center', justifyContent: 'center' },
-  searchIcon: { fontSize: 22, color: '#fff', transform: [{ scaleX: -1 }] },
+  // ── Tab bar ──
+  tabBarWrap: {
+    position: 'absolute', bottom: 30, left: 24, right: 24,
+    borderRadius: 32, overflow: 'hidden',
+    borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.18)',
+  },
+  tabBar: {
+    flexDirection: 'row', alignItems: 'center',
+    height: TAB_H, paddingHorizontal: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  tabItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4 },
+  tabDot: { width: 22, height: 22, borderRadius: 11 },
+  tabLabel: { fontSize: 10, fontWeight: '500' },
+  tabLabelActive: { color: '#fff' },
+  tabLabelInactive: { color: 'rgba(255,255,255,0.4)' },
 
-  // Modal
-  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+  // ── Modal (Apple TV style) ──
+  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' },
   modalSheet: {
-    backgroundColor: '#1A1A1A',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 24,
-    paddingBottom: 48,
-    paddingTop: 12,
+    backgroundColor: '#161616',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 8,
+    maxHeight: '92%',
+  },
+  dragHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 8 },
+  modalScroll: { paddingBottom: 40 },
+
+  heroWrap: {
+    width: '100%',
+    height: SCREEN_W * 0.75,  // 16:9-ish for backdrop
+    marginBottom: 0,
+  },
+  heroPoster: {
+    width: '100%',
+    height: '100%',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  heroGradient: {
+    position: 'absolute',
+    bottom: 0, left: 0, right: 0,
+    height: '70%',
+  },
+  heroTitleWrap: {
+    position: 'absolute',
+    bottom: 20, left: 24, right: 24,
     alignItems: 'center',
   },
-  dragHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)', marginBottom: 24 },
-  modalMovie: { fontSize: 26, fontWeight: '800', color: '#fff', textAlign: 'center', marginBottom: 6 },
-  modalYear:  { fontSize: 15, color: 'rgba(255,255,255,0.5)', marginBottom: 8 },
-  modalConfidence: { fontSize: 13, color: '#E50914', fontWeight: '600', marginBottom: 28 },
-  streamingWrap: { width: '100%' },
-  streamingTitle: { fontSize: 13, color: 'rgba(255,255,255,0.45)', marginBottom: 12, textAlign: 'center' },
-  streamingRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center' },
-  noStreaming: { fontSize: 14, color: 'rgba(255,255,255,0.4)', textAlign: 'center' },
-});
-
-// Streaming button styles (separate to avoid name clash with 's')
-const st = StyleSheet.create({
-  platformBtn: {
-    backgroundColor: '#E50914',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 12,
+  movieLogo: {
+    width: SCREEN_W * 0.65,
+    height: 80,
   },
-  platformTxt: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  modalMovie: { fontSize: 28, fontWeight: '800', color: '#fff', textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6 },
+
+  metaLine: { fontSize: 13, color: 'rgba(255,255,255,0.45)', textAlign: 'center', marginBottom: 6 },
+
+  genreLine: { fontSize: 13, color: 'rgba(255,255,255,0.35)', textAlign: 'center', marginBottom: 20 },
+
+  actionRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 10, paddingHorizontal: 24, marginBottom: 20,
+  },
+  actionBtn: {
+    flex: 1, backgroundColor: '#fff', borderRadius: 14,
+    paddingVertical: 14, alignItems: 'center',
+  },
+  actionBtnTxt: { color: '#000', fontWeight: '700', fontSize: 15 },
+  actionBtnMuted: {
+    flex: 1, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 14,
+    paddingVertical: 14, alignItems: 'center',
+  },
+  actionBtnMutedTxt: { color: 'rgba(255,255,255,0.35)', fontWeight: '600', fontSize: 14 },
+  saveCircle: {
+    width: 50, height: 50, borderRadius: 25,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+
+  synopsis: { fontSize: 14, color: 'rgba(255,255,255,0.55)', lineHeight: 21, paddingHorizontal: 24, marginBottom: 20 },
 });

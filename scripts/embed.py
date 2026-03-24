@@ -17,6 +17,7 @@ BATCH_SIZE = 256
 def make_id(movie: str, year: int, chunk_index: int) -> int:
     """Stable numeric ID from movie+year+chunk so re-runs are safe."""
     import hashlib
+
     key = f"{movie}|{year}|{chunk_index}"
     return int(hashlib.md5(key.encode()).hexdigest(), 16) % (2**63)
 
@@ -44,21 +45,23 @@ def main():
             with_vectors=False,
         )
         already_embedded = {
-            f"{p.payload['movie']}|{p.payload['year']}"
-            for p in result[0]
+            f"{p.payload['movie']}|{p.payload['year']}" for p in result[0]
         }
-        print(f"Collection exists — {len(already_embedded)} movies already embedded, skipping them")
+        print(
+            f"Collection exists — {len(already_embedded)} movies already embedded, skipping them"
+        )
 
     new_chunks = [
-        c for c in chunks
-        if f"{c['movie']}|{c['year']}" not in already_embedded
+        c for c in chunks if f"{c['movie']}|{c['year']}" not in already_embedded
     ]
 
     if not new_chunks:
         print("Nothing new to embed.")
         return
 
-    print(f"Embedding {len(new_chunks)} new chunks ({len(chunks) - len(new_chunks)} skipped)...")
+    print(
+        f"Embedding {len(new_chunks)} new chunks ({len(chunks) - len(new_chunks)} skipped)..."
+    )
 
     model = SentenceTransformer("all-MiniLM-L6-v2")
     texts = [c["text"] for c in new_chunks]

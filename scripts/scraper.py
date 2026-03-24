@@ -17,13 +17,13 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-API_KEY   = os.getenv("SUBDL_API_KEY")
-DATA_DIR  = Path(__file__).parent / "data"
+API_KEY = os.getenv("SUBDL_API_KEY")
+DATA_DIR = Path(__file__).parent / "data"
 MOVIES_TXT = DATA_DIR / "movies.txt"
 
-API_URL  = "https://api.subdl.com/api/v1/subtitles"
-DL_BASE  = "https://dl.subdl.com"
-DELAY    = 3  # seconds between requests
+API_URL = "https://api.subdl.com/api/v1/subtitles"
+DL_BASE = "https://dl.subdl.com"
+DELAY = 3  # seconds between requests
 
 
 def movie_to_filename(name: str, year: int) -> str:
@@ -45,10 +45,10 @@ def parse_movie_line(line: str) -> tuple[str, int]:
 def fetch_subtitle_url(name: str, year: int) -> str | None:
     """Return the first subtitle ZIP URL for the movie, or None."""
     params = {
-        "api_key":   API_KEY,
+        "api_key": API_KEY,
         "film_name": name,
-        "year":      year,
-        "type":      "movie",
+        "year": year,
+        "type": "movie",
         "languages": "EN",
     }
     resp = requests.get(API_URL, params=params, timeout=15)
