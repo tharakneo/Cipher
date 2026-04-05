@@ -21,7 +21,7 @@ import {
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
-const API_URL = 'http://192.168.0.98:8000/identify';
+const API_URL = 'http://localhost:8000/identify';
 
 // ── Types ────────────────────────────────────────────────────
 

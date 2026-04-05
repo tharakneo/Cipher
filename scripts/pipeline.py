@@ -6,12 +6,40 @@ Full Cipher pipeline:
   4. Start FastAPI backend
 """
 
+import re
+import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
+APP_TSX = ROOT / "expo" / "App.tsx"
+
+
+def get_local_ip() -> str:
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    finally:
+        s.close()
+
+
+def update_api_url() -> None:
+    ip = get_local_ip()
+    new_url = f"http://{ip}:8000/identify"
+    content = APP_TSX.read_text()
+    updated = re.sub(
+        r"const API_URL = '[^']*'",
+        f"const API_URL = '{new_url}'",
+        content,
+    )
+    if content != updated:
+        APP_TSX.write_text(updated)
+        print(f"  ✅ API_URL updated → {new_url}")
+    else:
+        print(f"  ✅ API_URL already correct → {new_url}")
 
 
 def run(label: str, cmd: list[str]) -> None:
@@ -79,6 +107,7 @@ def main() -> None:
     print("  Cipher Pipeline")
     print("━" * 42)
 
+    update_api_url()
     start_docker()
     start_qdrant()
 

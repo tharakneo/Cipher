@@ -22,3 +22,8 @@ expo/.expo/
 
 # Qdrant
 qdrant_storage/
+
+# Personal notes
+notes.md
+COMMANDS.md
+SEARCH_LOGIC.md
