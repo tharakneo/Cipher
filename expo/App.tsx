@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -10,18 +11,28 @@ import {
   Image,
   Linking,
   Modal,
-  PanResponder,
+  NativeModules,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
-  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 
-const { width: SCREEN_W } = Dimensions.get('window');
+const { AudioSessionModule } = NativeModules;
 
-const API_URL = 'http://localhost:8000/identify';
+const { height: SCREEN_H } = Dimensions.get('window');
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
+
+const API_URL = 'http://YOUR_SERVER_IP:8000/identify';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -89,6 +100,12 @@ export default function App() {
   const recordingRef                = useRef<Audio.Recording | null>(null);
   const autoStopRef                 = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+
+  // ── Notification permission ──────────────────────────────
+  useEffect(() => {
+    Notifications.requestPermissionsAsync();
+  }, []);
+
   const topLabel = {
     idle:       'Tap to Cipher',
     listening:  'Listening...',
@@ -137,7 +154,7 @@ export default function App() {
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
         staysActiveInBackground: true,
-        interruptionModeIOS: 0,
+        interruptionModeIOS: 2,
         shouldDuckAndroid: false,
         interruptionModeAndroid: 1,
       });
@@ -146,12 +163,13 @@ export default function App() {
         Audio.RecordingOptionsPresets.HIGH_QUALITY,
       );
       recordingRef.current = recording;
+      await AudioSessionModule.configure();
       setAppState('listening');
-      autoStopRef.current = setTimeout(stopRecording, 30_000);
+      autoStopRef.current = setTimeout(stopRecording, 11_000);
     } catch (err) {
       console.error('startRecording error:', err);
       setAppState('error');
-      setTimeout(() => setAppState('idle'), 2000);
+      setTimeout(() => setAppState('idle'), 2000); 
     }
   }
 
@@ -186,12 +204,15 @@ export default function App() {
   async function identifyMovie(uri: string) {
     setAppState('processing');
 
+    // Keep app alive in background while we upload + wait for result
+    await AudioSessionModule.beginBackgroundTask();
+
     try {
       const formData = new FormData();
       formData.append('audio', {
         uri,
         name: 'recording.m4a',
-        type: 'audio/m4a',
+        type: 'audio/mp4',
       } as any);
 
       const resp = await fetch(API_URL, {
@@ -218,10 +239,22 @@ export default function App() {
       setAppState('result');
       setModal(true);
 
+      // System notification (visible even when on another app)
+      Notifications.scheduleNotificationAsync({
+        content: {
+          title: matched.movie,
+          body: `${matched.year} · ${matched.confidence.toFixed(0)}% match`,
+          data: matched as unknown as Record<string, unknown>,
+        },
+        trigger: null,
+      });
+
     } catch (err) {
       console.error('identify error:', err);
       setAppState('error');
       setTimeout(() => setAppState('idle'), 2000);
+    } finally {
+      await AudioSessionModule.endBackgroundTask();
     }
   }
 
@@ -245,14 +278,6 @@ export default function App() {
     setResult(item);
     setModal(true);
   }
-
-  // ── Swipe-down pan responder for modal ───────────────────
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) => g.dy > 10,
-      onPanResponderRelease: (_, g) => { if (g.dy > 60) closeModal(); },
-    }),
-  ).current;
 
   // ── Render ───────────────────────────────────────────────
 
@@ -444,108 +469,95 @@ export default function App() {
         </View>
       </View>
 
-      {/* ── Result Modal ──────────────────────────────────── */}
+      {/* ── Result Modal (full-screen, Apple TV style) ────── */}
       <Modal
         visible={modalVisible}
-        transparent
+        transparent={false}
         animationType="slide"
         onRequestClose={closeModal}
       >
-        <TouchableWithoutFeedback onPress={closeModal}>
-          <View style={s.modalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={s.modalSheet} {...panResponder.panHandlers}>
-                <View style={s.dragHandle} />
+        <View style={s.modalRoot}>
+          {/* Close button */}
+          <TouchableOpacity style={s.modalClose} onPress={closeModal}>
+            <Ionicons name="chevron-back" size={26} color="#fff" />
+          </TouchableOpacity>
 
-                <ScrollView
-                  showsVerticalScrollIndicator={false}
-                  contentContainerStyle={s.modalScroll}
-                  bounces={false}
-                >
-                  {/* Hero: backdrop image + gradient blend + logo */}
-                  <View style={s.heroWrap}>
-                    {(result?.backdrop_url || result?.poster_url) ? (
-                      <Image
-                        source={{ uri: result.backdrop_url ?? result.poster_url }}
-                        style={s.heroPoster}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <View style={[s.heroPoster, { backgroundColor: '#2E2E2E' }]} />
-                    )}
-                    {/* Strong gradient — blends poster into dark sheet */}
-                    <LinearGradient
-                      colors={['transparent', 'rgba(22,22,22,0.5)', '#161616']}
-                      locations={[0.3, 0.7, 1]}
-                      style={s.heroGradient}
-                    />
-                    {/* Logo / title sitting on gradient */}
-                    <View style={s.heroTitleWrap}>
-                      {result?.logo_url ? (
-                        <Image
-                          source={{ uri: result.logo_url }}
-                          style={s.movieLogo}
-                          resizeMode="contain"
-                        />
-                      ) : (
-                        <Text style={s.modalMovie}>{result?.movie}</Text>
-                      )}
-                    </View>
-                  </View>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={s.modalScroll}
+            bounces={false}
+          >
+            {/* Full-screen poster hero — prefer backdrop (no title baked in) */}
+            <View style={s.heroWrap}>
+              {result?.poster_url ? (
+                <Image
+                  source={{ uri: result.poster_url }}
+                  style={s.heroPoster}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={[s.heroPoster, { backgroundColor: '#2E2E2E' }]} />
+              )}
 
-                  {/* Meta line: Year · Confidence */}
-                  <Text style={s.metaLine}>
-                    {result?.year}{`  ·  ${result?.confidence.toFixed(0)}% match`}
-                  </Text>
+              {/* Gradient blend into black */}
+              <LinearGradient
+                colors={['transparent', 'rgba(0,0,0,0.4)', '#000']}
+                locations={[0.45, 0.75, 1]}
+                style={s.heroGradient}
+              />
 
-                  {/* Genre line (inline, Apple TV style) */}
-                  {result?.genres && result.genres.length > 0 && (
-                    <Text style={s.genreLine}>
-                      {result.genres.join(' · ')}
-                    </Text>
-                  )}
-
-                  {/* Action row: streaming buttons + save */}
-                  <View style={s.actionRow}>
-                    {result && result.streaming.length > 0 ? (
-                      result.streaming.map((sv) => (
-                        <TouchableOpacity
-                          key={sv.platform}
-                          style={s.actionBtn}
-                          onPress={() => Linking.openURL(sv.deep_link)}
-                        >
-                          <Text style={s.actionBtnTxt}>{sv.platform}</Text>
-                        </TouchableOpacity>
-                      ))
-                    ) : (
-                      <View style={s.actionBtnMuted}>
-                        <Text style={s.actionBtnMutedTxt}>Not streaming</Text>
-                      </View>
-                    )}
-
-                    {result && (
-                      <TouchableOpacity
-                        style={s.saveCircle}
-                        onPress={() => toggleWatchlist(result)}
-                      >
-                        <Ionicons
-                          name={isInWatchlist(result.movie) ? 'bookmark' : 'bookmark-outline'}
-                          size={20}
-                          color={isInWatchlist(result.movie) ? '#E50914' : '#fff'}
-                        />
-                      </TouchableOpacity>
-                    )}
-                  </View>
-
-                  {/* Synopsis */}
-                  {result?.synopsis && (
-                    <Text style={s.synopsis}>{result.synopsis}</Text>
-                  )}
-                </ScrollView>
+              {/* Title overlaid at bottom-left of poster */}
+              <View style={s.heroTitleWrap}>
+                <Text style={s.modalMovie}>{result?.movie}</Text>
               </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+            </View>
+
+            {/* Meta: Genre · Year · Confidence */}
+            <Text style={s.metaLine}>
+              {result?.genres && result.genres.length > 0
+                ? `${result.genres.join(' · ')}  ·  `
+                : ''}
+              {result?.year}{`  ·  ${result?.confidence.toFixed(0)}% match`}
+            </Text>
+
+            {/* Action row: streaming buttons + save */}
+            <View style={s.actionRow}>
+              {result && result.streaming.length > 0 ? (
+                result.streaming.map((sv) => (
+                  <TouchableOpacity
+                    key={sv.platform}
+                    style={s.actionBtn}
+                    onPress={() => Linking.openURL(sv.deep_link)}
+                  >
+                    <Text style={s.actionBtnTxt}>{sv.platform}</Text>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <View style={s.actionBtnMuted}>
+                  <Text style={s.actionBtnMutedTxt}>Not streaming</Text>
+                </View>
+              )}
+
+              {result && (
+                <TouchableOpacity
+                  style={s.saveCircle}
+                  onPress={() => toggleWatchlist(result)}
+                >
+                  <Ionicons
+                    name={isInWatchlist(result.movie) ? 'bookmark' : 'bookmark-outline'}
+                    size={20}
+                    color={isInWatchlist(result.movie) ? '#E50914' : '#fff'}
+                  />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Synopsis */}
+            {result?.synopsis && (
+              <Text style={s.synopsis}>{result.synopsis}</Text>
+            )}
+          </ScrollView>
+        </View>
       </Modal>
     </View>
   );
@@ -651,48 +663,37 @@ const s = StyleSheet.create({
   tabLabelActive: { color: '#fff' },
   tabLabelInactive: { color: 'rgba(255,255,255,0.4)' },
 
-  // ── Modal (Apple TV style) ──
-  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' },
-  modalSheet: {
-    backgroundColor: '#161616',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingTop: 8,
-    maxHeight: '92%',
+  // ── Modal (full-screen, Apple TV style) ──
+  modalRoot: { flex: 1, backgroundColor: '#000' },
+  modalClose: {
+    position: 'absolute', top: 54, left: 16, zIndex: 10,
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center', justifyContent: 'center',
   },
-  dragHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 8 },
-  modalScroll: { paddingBottom: 40 },
+  modalScroll: { paddingBottom: 50 },
 
   heroWrap: {
     width: '100%',
-    height: SCREEN_W * 0.75,  // 16:9-ish for backdrop
-    marginBottom: 0,
+    height: SCREEN_H * 0.70,
   },
   heroPoster: {
     width: '100%',
     height: '100%',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
   },
   heroGradient: {
     position: 'absolute',
     bottom: 0, left: 0, right: 0,
-    height: '70%',
+    height: '55%',
   },
   heroTitleWrap: {
     position: 'absolute',
-    bottom: 20, left: 24, right: 24,
-    alignItems: 'center',
+    bottom: 24, left: 24, right: 24,
+    alignItems: 'flex-start',
   },
-  movieLogo: {
-    width: SCREEN_W * 0.65,
-    height: 80,
-  },
-  modalMovie: { fontSize: 28, fontWeight: '800', color: '#fff', textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6 },
+  modalMovie: { fontSize: 28, fontWeight: '800', color: '#fff', textAlign: 'left', textShadowColor: 'rgba(0,0,0,0.9)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 8 },
 
-  metaLine: { fontSize: 13, color: 'rgba(255,255,255,0.45)', textAlign: 'center', marginBottom: 6 },
-
-  genreLine: { fontSize: 13, color: 'rgba(255,255,255,0.35)', textAlign: 'center', marginBottom: 20 },
+  metaLine: { fontSize: 13, color: 'rgba(255,255,255,0.45)', textAlign: 'center', marginTop: 12, marginBottom: 20 },
 
   actionRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',

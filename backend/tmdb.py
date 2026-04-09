@@ -28,18 +28,10 @@ def get_movie_details(movie: str, year: int) -> dict:
         if r.get("genre_ids"):
             genres = _fetch_genres(r["genre_ids"])
 
-        logo_url = _fetch_logo(movie_id)
-
-        backdrop_url = (
-            f"https://image.tmdb.org/t/p/w780{r['backdrop_path']}"
-            if r.get("backdrop_path")
-            else None
-        )
+        poster_url = _fetch_second_poster(movie_id)
 
         return {
-            "poster_url": f"{_IMG}{r['poster_path']}" if r.get("poster_path") else None,
-            "backdrop_url": backdrop_url,
-            "logo_url": logo_url,
+            "poster_url": poster_url or (f"{_IMG}{r['poster_path']}" if r.get("poster_path") else None),
             "synopsis": r.get("overview") or None,
             "rating": round(r.get("vote_average", 0), 1),
             "genres": genres,
@@ -48,20 +40,19 @@ def get_movie_details(movie: str, year: int) -> dict:
         return {}
 
 
-def _fetch_logo(movie_id: int) -> str | None:
+def _fetch_second_poster(movie_id: int) -> str | None:
     try:
         resp = httpx.get(
             f"{_BASE}/movie/{movie_id}/images",
-            params={"api_key": _API_KEY, "include_image_language": "en,null"},
+            params={"api_key": _API_KEY, "include_image_language": "en"},
             timeout=6,
         )
         resp.raise_for_status()
-        logos = resp.json().get("logos", [])
-        if not logos:
-            return None
-        # prefer English logo, pick highest vote_average
-        logos.sort(key=lambda x: x.get("vote_average", 0), reverse=True)
-        return f"https://image.tmdb.org/t/p/w500{logos[0]['file_path']}"
+        posters = resp.json().get("posters", [])
+        posters.sort(key=lambda x: x.get("vote_average", 0), reverse=True)
+        # Use 2nd highest-rated English poster, fall back to 1st
+        chosen = posters[1] if len(posters) >= 2 else (posters[0] if posters else None)
+        return f"https://image.tmdb.org/t/p/w500{chosen['file_path']}" if chosen else None
     except Exception:
         return None
 

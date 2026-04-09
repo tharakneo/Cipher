@@ -5,10 +5,10 @@ __pycache__/
 *.pyo
 .Python
 
-# Environment — never commit secrets
+# Environment 
 .env
 
-# Data — SRTs and chunks are large, generate locally
+# Data - SRTs and chunks are large, generate locally
 scripts/data/*.srt
 scripts/data/chunks.json
 scripts/data/test_audio/

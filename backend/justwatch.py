@@ -77,6 +77,8 @@ _PROVIDERS = {
     "max": ("Max", _build_max),
     "hulu": ("Hulu", _build_hulu),
     "apple_tv_plus": ("Apple TV+", _build_appletv),
+    "appletvplus": ("Apple TV+", _build_appletv),
+    "amazonappletvplus": ("Apple TV+", _build_appletv),
     "itunes": ("Apple TV+", _build_appletv),
 }
 
@@ -120,10 +122,12 @@ def get_streaming(movie: str, year: int) -> list[dict]:
             continue
 
         platform_name, build_link = _PROVIDERS[tech]
+        if platform_name in seen:
+            continue
         web_url = offer.get("standardWebURL", "")
         deep_link = build_link(web_url) if web_url else ""
 
         results.append({"platform": platform_name, "deep_link": deep_link})
-        seen.add(tech)
+        seen.add(platform_name)
 
     return results

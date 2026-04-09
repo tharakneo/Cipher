@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "cipher-app",
+    "name": "cipher",
     "slug": "cipher-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -15,7 +15,10 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.anonymous.cipher-app",
       "infoPlist": {
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": ["audio"],
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
       }
     },
     "android": {

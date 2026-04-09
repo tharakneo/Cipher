@@ -8,7 +8,7 @@ from rapidfuzz import fuzz
 from sentence_transformers import SentenceTransformer
 
 COLLECTION_NAME = "cipher"
-TOP_K = 20               # results per sentence in vector search
+TOP_K = 40               # results per sentence in vector search
 MAX_CANDIDATES = 10       # movies to fuzzy match against
 FUZZY_THRESHOLD = 70      # minimum fuzzy score to count as a match
 MIN_FUZZY_MATCHES = 1     # minimum sentences that must fuzzy match
