@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Audio } from 'expo-av';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
@@ -32,7 +33,8 @@ Notifications.setNotificationHandler({
   }),
 });
 
-const API_URL = 'http://YOUR_SERVER_IP:8000/identify';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000/identify';
+const IMAGE_API_URL = process.env.EXPO_PUBLIC_API_URL ? `${process.env.EXPO_PUBLIC_API_URL}/identify/image` : 'http://localhost:8000/identify/image';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -165,7 +167,7 @@ export default function App() {
       recordingRef.current = recording;
       await AudioSessionModule.configure();
       setAppState('listening');
-      autoStopRef.current = setTimeout(stopRecording, 11_000);
+      autoStopRef.current = setTimeout(stopRecording, 15_000);
     } catch (err) {
       console.error('startRecording error:', err);
       setAppState('error');
@@ -268,6 +270,52 @@ export default function App() {
     }
   }
 
+  async function pickImage() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow photo library access to search by image.');
+      return;
+    }
+
+    const picked = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+    });
+
+    if (picked.canceled || !picked.assets[0]) return;
+
+    setAppState('processing');
+    try {
+      const uri = picked.assets[0].uri;
+      const formData = new FormData();
+      formData.append('image', { uri, name: 'image.jpg', type: 'image/jpeg' } as any);
+
+      const resp = await fetch(IMAGE_API_URL, { method: 'POST', body: formData });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+      const data = await resp.json();
+      if (data.match === false || !data.movie) {
+        setAppState('nomatch');
+        setTimeout(() => setAppState('idle'), 2000);
+        return;
+      }
+
+      const matched = data as MatchResult;
+      setResult(matched);
+      setHistory(prev => {
+        const filtered = prev.filter(h => h.movie !== matched.movie);
+        return [{ ...matched, foundAt: Date.now() }, ...filtered].slice(0, 50);
+      });
+      setAppState('result');
+      setModal(true);
+    } catch (err) {
+      console.error('pickImage error:', err);
+      setAppState('error');
+      setTimeout(() => setAppState('idle'), 2000);
+    }
+  }
+
+
   function closeModal() {
     setModal(false);
     setAppState('idle');
@@ -308,6 +356,15 @@ export default function App() {
 
             {appState === 'listening' && (
               <Text style={s.stopHint}>Tap to stop</Text>
+            )}
+
+            {(appState === 'idle' || appState === 'result') && (
+              <View style={s.mediaBtnRow}>
+                <TouchableOpacity onPress={pickImage} style={s.imageBtn} activeOpacity={0.7}>
+                  <Ionicons name="image-outline" size={20} color="rgba(255,255,255,0.6)" />
+                  <Text style={s.imageBtnTxt}>Search by image</Text>
+                </TouchableOpacity>
+              </View>
             )}
 
             {appState === 'processing' && (
@@ -716,4 +773,8 @@ const s = StyleSheet.create({
   },
 
   synopsis: { fontSize: 14, color: 'rgba(255,255,255,0.55)', lineHeight: 21, paddingHorizontal: 24, marginBottom: 20 },
+
+  mediaBtnRow: { flexDirection: 'row', gap: 10 },
+  imageBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 20, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.08)' },
+  imageBtnTxt: { fontSize: 13, color: 'rgba(255,255,255,0.6)', fontWeight: '500' },
 });

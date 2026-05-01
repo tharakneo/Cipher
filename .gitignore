@@ -27,3 +27,10 @@ qdrant_storage/
 notes.md
 COMMANDS.md
 SEARCH_LOGIC.md
+
+# Build scripts with sensitive URLs
+vision/run_all.py
+phash/run_all.py
+
+# Large datasets
+datasets/

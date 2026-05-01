@@ -28,18 +28,21 @@ def get_local_ip() -> str:
 
 def update_api_url() -> None:
     ip = get_local_ip()
-    new_url = f"http://{ip}:8000/identify"
+    base = f"http://{ip}:8000"
     content = APP_TSX.read_text()
     updated = re.sub(
-        r"const API_URL = '[^']*'",
-        f"const API_URL = '{new_url}'",
-        content,
+        r"const API_URL = '[^']*'", f"const API_URL = '{base}/identify'", content
+    )
+    updated = re.sub(
+        r"const IMAGE_API_URL = '[^']*'",
+        f"const IMAGE_API_URL = '{base}/identify/image'",
+        updated,
     )
     if content != updated:
         APP_TSX.write_text(updated)
-        print(f"  ✅ API_URL updated → {new_url}")
+        print(f"  ✅ API URLs updated → {base}")
     else:
-        print(f"  ✅ API_URL already correct → {new_url}")
+        print(f"  ✅ API URLs already correct → {base}")
 
 
 def run(label: str, cmd: list[str]) -> None:

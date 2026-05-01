@@ -8,10 +8,10 @@ from rapidfuzz import fuzz
 from sentence_transformers import SentenceTransformer
 
 COLLECTION_NAME = "cipher"
-TOP_K = 40               # results per sentence in vector search
-MAX_CANDIDATES = 10       # movies to fuzzy match against
-FUZZY_THRESHOLD = 70      # minimum fuzzy score to count as a match
-MIN_FUZZY_MATCHES = 1     # minimum sentences that must fuzzy match
+TOP_K = 40  # results per sentence in vector search
+MAX_CANDIDATES = 10  # movies to fuzzy match against
+FUZZY_THRESHOLD = 70  # minimum fuzzy score to count as a match
+MIN_FUZZY_MATCHES = 1  # minimum sentences that must fuzzy match
 
 _client = QdrantClient(host="127.0.0.1", port=6333)
 _model = SentenceTransformer("all-MiniLM-L6-v2")
@@ -19,7 +19,7 @@ _model = SentenceTransformer("all-MiniLM-L6-v2")
 
 def _split_sentences(text: str) -> list[str]:
     """Split transcript into sentences, keep 3+ word ones."""
-    parts = re.split(r'[.!?]+', text)
+    parts = re.split(r"[.!?]+", text)
     return [p.strip() for p in parts if len(p.strip().split()) >= 3]
 
 
@@ -61,9 +61,7 @@ def _load_movie_text(movie: str) -> str:
     while True:
         results, offset = _client.scroll(
             collection_name=COLLECTION_NAME,
-            scroll_filter={
-                "must": [{"key": "movie", "match": {"value": movie}}]
-            },
+            scroll_filter={"must": [{"key": "movie", "match": {"value": movie}}]},
             limit=500,
             with_payload=True,
             offset=offset,
@@ -120,7 +118,9 @@ def search(query: str) -> dict | None:
             continue
         match_count, avg_score = _fuzzy_score(sentences, movie_text)
         results.append((movie, match_count, avg_score))
-        print(f"[fuzzy] {movie}: {match_count}/{len(sentences)} sentences matched, avg={avg_score:.1f}")
+        print(
+            f"[fuzzy] {movie}: {match_count}/{len(sentences)} sentences matched, avg={avg_score:.1f}"
+        )
 
     if not results:
         return None
@@ -137,7 +137,9 @@ def search(query: str) -> dict | None:
     # Confidence = avg fuzzy score of matched sentences
     confidence = best_avg
 
-    print(f"[search] winner: {best_movie} ({best_count}/{len(sentences)} matched, confidence={confidence:.1f}%)")
+    print(
+        f"[search] winner: {best_movie} ({best_count}/{len(sentences)} matched, confidence={confidence:.1f}%)"
+    )
 
     return {
         "movie": best_movie,

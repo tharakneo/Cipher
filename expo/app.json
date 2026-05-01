@@ -44,6 +44,12 @@
         {
           "microphonePermission": "Cipher needs microphone access to identify movies."
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Cipher needs photo library access to identify movies by image."
+        }
       ]
     ]
   }

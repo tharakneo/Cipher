@@ -1,12 +1,11 @@
 # Whisper STT logic — uses whisper.cpp with Metal acceleration
 
-import os
 import subprocess
 import tempfile
 from pathlib import Path
 
-WHISPER_BIN = os.environ.get("WHISPER_BIN", "whisper-cli")
-WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "models/ggml-small.bin")
+WHISPER_BIN = "/Users/tharakneo/whisper.cpp/build/bin/whisper-cli"
+WHISPER_MODEL = "/Users/tharakneo/whisper.cpp/models/ggml-small.bin"
 
 
 def transcribe(audio_path: str) -> str:
@@ -22,7 +21,16 @@ def transcribe(audio_path: str) -> str:
         )
 
         result = subprocess.run(
-            [WHISPER_BIN, "-m", WHISPER_MODEL, "-f", wav_path, "--no-timestamps", "-l", "en"],
+            [
+                WHISPER_BIN,
+                "-m",
+                WHISPER_MODEL,
+                "-f",
+                wav_path,
+                "--no-timestamps",
+                "-l",
+                "en",
+            ],
             check=True,
             capture_output=True,
             text=True,

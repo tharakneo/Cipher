@@ -1,4 +1,4 @@
-# FastAPI app — single POST /identify endpoint
+# FastAPI app - single POST /identify endpoint
 
 import tempfile
 from pathlib import Path
@@ -10,6 +10,7 @@ from .transcribe import transcribe
 from .search import search
 from .justwatch import get_streaming
 from .tmdb import get_movie_details
+from vision.search import search as vision_search
 
 app = FastAPI()
 
@@ -89,3 +90,36 @@ async def identify(audio: UploadFile = File(...)):
     finally:
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)
+
+
+@app.post("/identify/image")
+async def identify_image(image: UploadFile = File(...)):
+    content = await image.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Image file is empty")
+
+    try:
+        result = vision_search(content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if result is None:
+        return JSONResponse({"match": False})
+
+    streaming = get_streaming(result["movie"], result["year"])
+    tmdb = get_movie_details(result["movie"], result["year"])
+
+    return JSONResponse(
+        {
+            "movie": result["movie"],
+            "year": result["year"],
+            "confidence": result["confidence"],
+            "poster_url": tmdb.get("poster_url"),
+            "backdrop_url": tmdb.get("backdrop_url"),
+            "logo_url": tmdb.get("logo_url"),
+            "synopsis": tmdb.get("synopsis"),
+            "rating": tmdb.get("rating"),
+            "genres": tmdb.get("genres", []),
+            "streaming": streaming,
+        }
+    )

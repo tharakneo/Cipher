@@ -31,7 +31,8 @@ def get_movie_details(movie: str, year: int) -> dict:
         poster_url = _fetch_second_poster(movie_id)
 
         return {
-            "poster_url": poster_url or (f"{_IMG}{r['poster_path']}" if r.get("poster_path") else None),
+            "poster_url": poster_url
+            or (f"{_IMG}{r['poster_path']}" if r.get("poster_path") else None),
             "synopsis": r.get("overview") or None,
             "rating": round(r.get("vote_average", 0), 1),
             "genres": genres,
@@ -52,7 +53,9 @@ def _fetch_second_poster(movie_id: int) -> str | None:
         posters.sort(key=lambda x: x.get("vote_average", 0), reverse=True)
         # Use 2nd highest-rated English poster, fall back to 1st
         chosen = posters[1] if len(posters) >= 2 else (posters[0] if posters else None)
-        return f"https://image.tmdb.org/t/p/w500{chosen['file_path']}" if chosen else None
+        return (
+            f"https://image.tmdb.org/t/p/w500{chosen['file_path']}" if chosen else None
+        )
     except Exception:
         return None
 
